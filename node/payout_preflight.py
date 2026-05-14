@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Dict, Optional, Tuple
@@ -14,6 +15,21 @@ def _is_rtc_address(value: str) -> bool:
 
 def _is_bcn_address(value: str) -> bool:
     return value.startswith("bcn_") and len(value) >= 8
+
+
+def _missing_required_fields(data: Dict[str, Any], required: list[str]) -> list[str]:
+    missing: list[str] = []
+    for key in required:
+        if key not in data:
+            missing.append(key)
+            continue
+        value = data.get(key)
+        if value is None:
+            missing.append(key)
+            continue
+        if isinstance(value, str) and not value.strip():
+            missing.append(key)
+    return missing
 
 
 @dataclass(frozen=True)
@@ -86,7 +102,7 @@ def validate_wallet_transfer_signed(payload: Any) -> PreflightResult:
         return PreflightResult(ok=False, error=err, details={})
 
     required = ["from_address", "to_address", "amount_rtc", "nonce", "signature"]
-    missing = [k for k in required if not data.get(k)]
+    missing = _missing_required_fields(data, required)
     if missing:
         return PreflightResult(ok=False, error="missing_required_fields", details={"missing": missing})
 
@@ -121,6 +137,10 @@ def validate_wallet_transfer_signed(payload: Any) -> PreflightResult:
     if nonce_int <= 0:
         return PreflightResult(ok=False, error="nonce_must_be_gt_zero", details={})
 
+    chain_id = str(data.get("chain_id", "")).strip()
+    if chain_id and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", chain_id):
+        return PreflightResult(ok=False, error="invalid_chain_id_format", details={})
+
     return PreflightResult(
         ok=True,
         error="",
@@ -130,5 +150,6 @@ def validate_wallet_transfer_signed(payload: Any) -> PreflightResult:
             "amount_rtc": float(amount_rtc),
             "amount_i64": amount_i64,
             "nonce": nonce_int,
+            "chain_id": chain_id or None,
         },
     )
